@@ -1,26 +1,47 @@
-import { Injectable } from '@nestjs/common';
-import { CreateAuthDto } from './dto/create-auth.dto';
-import { UpdateAuthDto } from './dto/update-auth.dto';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
+import { JwtService } from '@nestjs/jwt';
+import { UsersService } from 'src/users/users.service';
+import { CreateUserDto } from 'src/users/dto/create-user.dto';
+import { LoginDto } from 'src/users/dto/login.dto';
 
 @Injectable()
 export class AuthService {
-  create(createAuthDto: CreateAuthDto) {
-    return 'This action adds a new auth';
+  constructor(
+    private usersService: UsersService,
+    private jwtService: JwtService,
+  ) {}
+
+  async signup(createUserDto: CreateUserDto) {
+    const existing = await this.usersService.findByEmail(createUserDto.email);
+    if (existing) throw new BadRequestException('Email already in use');
+
+    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    return this.usersService.create({
+      ...createUserDto,
+      password: hashedPassword,
+    });
   }
 
-  findAll() {
-    return `This action returns all auth`;
+  async login(credentials: LoginDto) {
+    const { email, password } = credentials;
+
+    const user = await this.usersService.findByEmail(email);
+    if (!user) throw new UnauthorizedException('Wrong credentials');
+
+    const passwordMatch = await bcrypt.compare(password, user.password);
+    if (!passwordMatch) throw new UnauthorizedException('Wrong credentials');
+
+    const tokens = await this.generateUserTokens(user.id);
+    return { ...tokens, userId: user.id };
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} auth`;
-  }
-
-  update(id: number, updateAuthDto: UpdateAuthDto) {
-    return `This action updates a #${id} auth`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} auth`;
+  private async generateUserTokens(userId: string) {
+    const accessToken = await this.jwtService.signAsync({ sub: userId });
+    return { accessToken };
   }
 }
